@@ -409,6 +409,13 @@ html.dark .prose-sm pre span {
   height: auto;
 }
 
+/* Keep video embeds responsive without collapsing to the iframe default height. */
+.prose iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+}
+
 /* 图片已在 globals.css 中处理，这里再次确保 */
 .prose img {
   max-width: 100%;
