@@ -1,6 +1,7 @@
 import { dayjs } from '@/lib/dayjs'
 import { pages } from '@/lib/data'
 import { siteConfig } from '@/lib/config'
+import { Pagination } from '@/components/pagination'
 import { PostListItem } from '@/components/post-list-item'
 import { getAllPosts } from '@/lib/posts'
 import { YEAR_DESC_MAP } from '@/lib/year-desc'
@@ -8,7 +9,13 @@ import { generateCanonicalUrl, generateBreadcrumbSchema, generateWebPageSchema }
 
 import type { Metadata } from 'next'
 
-export const revalidate = 86400 // 缓存 1 天
+const PAGE_SIZE = 20
+
+interface PageProps {
+  searchParams: Promise<{
+    page?: string
+  }>
+}
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
@@ -42,7 +49,8 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-export default async function PostsPage() {
+export default async function PostsPage({ searchParams }: PageProps) {
+  const { page: pageParam } = await searchParams
   const allPosts = await getAllPosts()
   const pinnedPosts = allPosts.filter((post) => post.top)
   const posts = allPosts.filter((post) => !post.top)
@@ -50,30 +58,16 @@ export default async function PostsPage() {
   // 计算总字数
   const totalWords = allPosts.reduce((sum, post) => sum + post.wordCount, 0)
 
+  // 分页（置顶文章仅在第一页显示）
+  const totalPages = Math.max(1, Math.ceil(posts.length / PAGE_SIZE))
+  const page = Math.min(Math.max(Math.floor(Number(pageParam)) || 1, 1), totalPages)
+  const pagePosts = posts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   // 按年份分组
-  const postsByYear = Object.groupBy(posts, (post) => dayjs(post.date).year())
-
-  // 生成从最早文章到当前年份的完整年份列表
-  const currentYear = dayjs().year()
-  const earliestYear =
-    posts.length > 0 ? Math.min(...posts.map((p) => dayjs(p.date).year())) : currentYear
-  const allYears = Array.from({ length: currentYear - earliestYear + 1 }, (_, i) => currentYear - i)
-
-  // 空年份提示语
-  const emptyYearMessages = [
-    '这一年的想法还在酝酿中',
-    '这一年选择了沉淀与思考',
-    '这一年暂时放下了写作',
-    '这一年在积累更多的灵感',
-    '这一年在探索新的领域',
-    '这一年在享受生活的美好',
-  ]
-
-  const getEmptyYearMessage = (year: number) => {
-    // 根据年份确定性地选择一条提示语
-    const index = year % emptyYearMessages.length
-    return emptyYearMessages[index]
-  }
+  const postsByYear = Object.groupBy(pagePosts, (post) => dayjs(post.date).year())
+  const allYears = Object.keys(postsByYear)
+    .map(Number)
+    .sort((a, b) => b - a)
 
   return (
     <>
@@ -101,12 +95,12 @@ export default async function PostsPage() {
         <section className="space-y-3">
           <h1 className="text-3xl font-bold sm:text-4xl">{pages.posts.title}</h1>
           <p className="text-text-secondary">
-            {`${pages.posts.description}，共 ${allPosts.length.toLocaleString('zh-Hans-CN')} 篇，累计 ${totalWords.toLocaleString('zh-Hans-CN')} 字，按年份分组展示。`}
+            {`${pages.posts.description}，共 ${allPosts.length.toLocaleString('zh-Hans-CN')} 篇，累计 ${totalWords.toLocaleString('zh-Hans-CN')} 字，按年份分组展示，第 ${page} / ${totalPages} 页。`}
           </p>
         </section>
 
         {/* Pinned Posts */}
-        {pinnedPosts.length > 0 && (
+        {page === 1 && pinnedPosts.length > 0 && (
           <section className="space-y-4">
             <h2 className="text-text-primary text-xl font-bold sm:text-2xl">
               置顶{' '}
@@ -126,7 +120,6 @@ export default async function PostsPage() {
         <section className="space-y-12">
           {allYears.map((year) => {
             const yearPosts = postsByYear[year] || []
-            const hasNoPosts = yearPosts.length === 0
 
             return (
               <div key={year} className="space-y-4 sm:space-y-6">
@@ -140,18 +133,21 @@ export default async function PostsPage() {
                   </span>
                 </h2>
                 <div className="border-border-tertiary space-y-1 border-l-2 pl-4 sm:pl-6">
-                  {hasNoPosts ? (
-                    <p className="text-text-tertiary text-xs italic opacity-60 sm:text-sm">
-                      {getEmptyYearMessage(year)}
-                    </p>
-                  ) : (
-                    yearPosts.map((post) => <PostListItem key={post.slug} post={post} />)
-                  )}
+                  {yearPosts.map((post) => (
+                    <PostListItem key={post.slug} post={post} />
+                  ))}
                 </div>
               </div>
             )
           })}
         </section>
+
+        {/* 分页 */}
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          buildHref={(p) => (p === 1 ? '/posts' : `/posts?page=${p}`)}
+        />
       </div>
     </>
   )
