@@ -1,6 +1,6 @@
 ---
 title: '战马'
-date: 2026-10-10T00:20
+date: 2026-10-10
 topic: '技术'
 excerpt: '这是一篇文章'
 tags:
