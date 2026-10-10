@@ -1,3 +1,5 @@
+import { visit } from 'unist-util-visit'
+import type { Root } from 'hast'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import rehypeSlug from 'rehype-slug'
@@ -25,69 +27,113 @@ import { stripMarkdown } from './reading-time.ts'
  * 3. 更简单：单一处理链，易于理解和维护
  * 4. 缓存友好：可缓存编译结果
  */
-const processor = unified()
-  .use(remarkParse)
-  .use(remarkGfm)
-  .use(remarkBreaks)
-  .use(remarkEmojiPack)
-  .use(remarkSpoiler)
-  .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeRaw)
-  .use(rehypeSanitize, {
-    ...defaultSchema,
-    attributes: {
-      ...defaultSchema.attributes,
-      span: [...(defaultSchema.attributes?.span || []), ['className', 'spoiler'], ['title']],
-      img: [
-        ...(defaultSchema.attributes?.img || []),
-        ['loading', 'lazy', 'eager'],
-        ['className', 'emoji'],
-        ['referrerPolicy'],
-        ['width'],
-        ['height'],
-        ['crossOrigin'],
-      ],
-      video: [
-        ...(defaultSchema.attributes?.video || []),
-        ['loading'],
-        ['controls'],
-        ['src'],
-        ['style'],
-        ['class'],
-        ['poster'],
-        ['width'],
-        ['height'],
-      ],
-    },
-    tagNames: [...(defaultSchema.tagNames || []), 'video'],
-  })
-  .use(rehypePrettyCode, {
-    keepBackground: false,
-    theme: {
-      light: 'one-light',
-      dark: 'one-dark-pro',
-    },
-  })
-  .use(rehypeSlug)
-  .use(rehypeAutolinkHeadings, {
-    behavior: 'append',
-    content: {
-      type: 'text',
-      value: '#',
-    },
-    properties: {
-      className: ['heading-anchor'],
-      ariaHidden: true,
-      tabIndex: -1,
-    },
-  })
-  .use(rehypeZoomImage)
-  .use(rehypeImageCaption)
-  .use(rehypeExternalLinks, {
-    target: '_blank',
-    rel: ['noopener', 'noreferrer'],
-  })
-  .use(rehypeStringify)
+const youtubeEmbedUrl =
+  /^https:\/\/www\.(?:youtube|youtube-nocookie)\.com\/embed\/[A-Za-z0-9_-]+(?:\?[^#\s]*)?$/
+
+// Only repo-authored articles can embed approved video providers.
+function rehypeArticleEmbeds() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node, index, parent) => {
+      if (node.tagName !== 'iframe') return
+      if (!youtubeEmbedUrl.test(String(node.properties.src || ''))) {
+        if (parent && typeof index === 'number') {
+          parent.children.splice(index, 1)
+          return index
+        }
+        return
+      }
+      node.properties.loading = 'lazy'
+      node.properties.referrerPolicy = 'strict-origin-when-cross-origin'
+      node.properties.allow = 'encrypted-media; picture-in-picture; fullscreen'
+      node.properties.sandbox = ['allow-scripts', 'allow-same-origin', 'allow-presentation']
+    })
+  }
+}
+
+function createProcessor(articleEmbeds = false) {
+  const processor = unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkBreaks)
+    .use(remarkEmojiPack)
+    .use(remarkSpoiler)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw)
+    .use(rehypeSanitize, {
+      ...defaultSchema,
+      attributes: {
+        ...defaultSchema.attributes,
+        ...(articleEmbeds
+          ? {
+              iframe: [
+                ['src', youtubeEmbedUrl],
+                'title',
+                'width',
+                'height',
+                'allowFullScreen',
+                'frameBorder',
+              ],
+            }
+          : {}),
+        span: [...(defaultSchema.attributes?.span || []), ['className', 'spoiler'], ['title']],
+        img: [
+          ...(defaultSchema.attributes?.img || []),
+          ['loading', 'lazy', 'eager'],
+          ['className', 'emoji'],
+          ['referrerPolicy'],
+          ['width'],
+          ['height'],
+          ['crossOrigin'],
+        ],
+        video: [
+          ...(defaultSchema.attributes?.video || []),
+          ['loading'],
+          ['controls'],
+          ['src'],
+          ['style'],
+          ['class'],
+          ['poster'],
+          ['width'],
+          ['height'],
+        ],
+      },
+      tagNames: [...(defaultSchema.tagNames || []), 'video', ...(articleEmbeds ? ['iframe'] : [])],
+    })
+
+  if (articleEmbeds) processor.use(rehypeArticleEmbeds)
+
+  return processor
+    .use(rehypePrettyCode, {
+      keepBackground: false,
+      theme: {
+        light: 'one-light',
+        dark: 'one-dark-pro',
+      },
+    })
+    .use(rehypeSlug)
+    .use(rehypeAutolinkHeadings, {
+      behavior: 'append',
+      content: {
+        type: 'text',
+        value: '#',
+      },
+      properties: {
+        className: ['heading-anchor'],
+        ariaHidden: true,
+        tabIndex: -1,
+      },
+    })
+    .use(rehypeZoomImage)
+    .use(rehypeImageCaption)
+    .use(rehypeExternalLinks, {
+      target: '_blank',
+      rel: ['noopener', 'noreferrer'],
+    })
+    .use(rehypeStringify)
+}
+
+const processor = createProcessor()
+const articleProcessor = createProcessor(true)
 
 /**
  * 解析 Markdown 为 HTML
@@ -117,7 +163,7 @@ export async function parseArticle(content: string): Promise<string> {
 
   // const t = content.slice(0, 10).replace(/\s+/g, '_')
   // console.time(`s-${t}`)
-  const result = await processor.process(content)
+  const result = await articleProcessor.process(content)
   // console.timeEnd(`s-${t}`)
 
   return String(result)
